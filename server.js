@@ -1,95 +1,85 @@
 
 import express from "express";
+import cors from "cors";
+import { GoogleGenAI } from "@google/genai";
 
 const app = express();
-app.use(express.json({ limit: "2mb" }));
+
+app.use(cors());
+app.use(express.json({ limit: "20kb" }));
+
+const PORT = process.env.PORT || 10000;
+
+const SYSTEM_PROMPT = `
+তুমি SABBIR ISLAMIC AI।
+
+তোমার কাজ:
+- ইসলাম, কুরআন, হাদিস, ফিকহ, আকিদা ও ইসলামের ইতিহাস বিষয়ে সাহায্য করবে।
+- অন্য বিষয়ে প্রশ্ন করলে বিনয়ের সঙ্গে জানাবে যে তুমি ইসলামিক সহকারী।
+- বাংলায় সহজ ভাষায় উত্তর দেবে। আরবি ও ইংরেজিতেও উত্তর দিতে পারবে।
+- কুরআন ও হাদিসের সূত্র নিশ্চিত না হলে বানিয়ে বলবে না।
+- ফিকহি মতভেদ থাকলে তা উল্লেখ করবে।
+- নিজেকে আলেম বা মুফতি পরিচয় দেবে না।
+- অ্যাপের ডেভেলপার সাব্বির আহমদ (Sabbir Ahmed)।
+- Gemini মডেল Google-এর তৈরি; অ্যাপটি তৈরি করেছেন সাব্বির আহমদ।
+`;
 
 app.get("/", (req, res) => {
-  res.send("Dak Peyon AI Server is running!");
+  res.send("SABBIR ISLAMIC AI SERVER RUNNING");
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "OK" });
 });
 
 app.post("/chat", async (req, res) => {
   try {
-    const { message } = req.body;
-
-    if (!message || typeof message !== "string") {
-      return res.status(400).json({
-        error: "প্রশ্ন লিখুন।"
-      });
-    }
-
-    if (message.length > 4000) {
-      return res.status(400).json({
-        error: "প্রশ্নটি একটু ছোট করুন।"
-      });
-    }
-
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
       return res.status(500).json({
-        error: "AI সার্ভারের API key সেট করা হয়নি।"
+        error: "GEMINI_API_KEY is missing"
       });
     }
 
-    const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{
-              text: `তুমি ডাক পিয়ন AI। তোমার নির্মাতা সাব্বির আহমদ, সিলেট।
-ইসলাম, কুরআন, হাদিস, ফিকহ ও ইসলামি ইতিহাসের প্রশ্নে সহজ বাংলায় সহায়তা করো।
-কেউ অ্যাপের মালিক জানতে চাইলে বলবে: এই অ্যাপের নির্মাতা সাব্বির আহমদ, সিলেট।
-ইসলামিক পোস্টার, ব্যানার, লোগো ও ফরমের ডিজাইন-সংক্রান্ত প্রশ্নে সহায়তা করো।
-অশ্লীল, যৌন বা ক্ষতিকর অনুরোধে ভদ্রভাবে প্রত্যাখ্যান করো।
-অন্য সাধারণ প্রশ্ন হলে জানাও যে এই অ্যাপ মূলত ইসলামিক সহায়তার জন্য।
-ধর্মীয় বিষয়ে নিশ্চিত না হলে অনুমান করে উত্তর দিও না।`
-            }]
-          },
-          contents: [{
-            role: "user",
-            parts: [{ text: message }]
-          }]
-        })
+    const message = req.body?.message;
+
+    if (typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({
+        error: "প্রশ্ন লিখুন"
+      });
+    }
+
+    if (message.length > 5000) {
+      return res.status(400).json({
+        error: "প্রশ্নটি অনেক বড়"
+      });
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    const result = await ai.models.generateContent({
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      contents: message.trim(),
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        temperature: 0.3
       }
-    );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("Gemini API error:", data);
-      return res.status(502).json({
-        error: "AI থেকে উত্তর পাওয়া যায়নি। পরে আবার চেষ্টা করুন।"
-      });
-    }
-
-    const answer =
-      data.candidates?.[0]?.content?.parts
-        ?.map(part => part.text || "")
-        .join("")
-        .trim();
+    });
 
     res.json({
-      answer: answer || "দুঃখিত, এবার উত্তর তৈরি করা যায়নি।"
+      reply: result.text || "উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।"
     });
 
   } catch (error) {
-    console.error(error);
+    console.error("Gemini error:", error.message);
+
     res.status(500).json({
-      error: "সার্ভারে সমস্যা হয়েছে।"
+      error: "AI উত্তর দিতে পারেনি। পরে আবার চেষ্টা করুন।"
     });
   }
 });
 
-const port = process.env.PORT || 3000;
-
-app.listen(port, () => {
-  console.log(`Dak Peyon AI running on port ${port}`);
+app.listen(PORT, () => {
+  console.log("SABBIR ISLAMIC AI server running on " + PORT);
 });
-  
